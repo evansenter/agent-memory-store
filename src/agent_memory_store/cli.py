@@ -214,19 +214,24 @@ def cmd_explore(args, storage: MemoryStorage) -> int:
     stats = storage.explore()
 
     if args.json:
-        print(json.dumps({
-            "total_count": stats.total_count,
-            "namespaces": stats.namespaces,
-            "top_tags": stats.tags,
-            "importance_distribution": stats.importance_distribution,
-            "date_range": {
-                "oldest": stats.date_range[0].isoformat() if stats.date_range[0] else None,
-                "newest": stats.date_range[1].isoformat() if stats.date_range[1] else None,
-            },
-            "avg_importance": stats.avg_importance,
-            "total_access_count": stats.total_access_count,
-            "semantic_available": stats.semantic_available,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "total_count": stats.total_count,
+                    "namespaces": stats.namespaces,
+                    "top_tags": stats.tags,
+                    "importance_distribution": stats.importance_distribution,
+                    "date_range": {
+                        "oldest": stats.date_range[0].isoformat() if stats.date_range[0] else None,
+                        "newest": stats.date_range[1].isoformat() if stats.date_range[1] else None,
+                    },
+                    "avg_importance": stats.avg_importance,
+                    "total_access_count": stats.total_access_count,
+                    "semantic_available": stats.semantic_available,
+                },
+                indent=2,
+            )
+        )
     else:
         print(f"Total memories: {stats.total_count}")
         print(f"Average importance: {stats.avg_importance}")
@@ -288,7 +293,10 @@ def cmd_search_weighted(args, storage: MemoryStorage) -> int:
         print(json.dumps(output, indent=2))
     else:
         for sm in results:
-            scores = f"[score={sm.score:.2f} r={sm.recency_score:.2f} i={sm.importance_score:.2f} rel={sm.relevance_score:.2f}]"
+            scores = (
+                f"[score={sm.score:.2f} r={sm.recency_score:.2f} "
+                f"i={sm.importance_score:.2f} rel={sm.relevance_score:.2f}]"
+            )
             print(f"{sm.memory.key} {scores}: {sm.memory.value[:80]}...")
 
     return 0
@@ -312,8 +320,8 @@ def cmd_aggregate(args, storage: MemoryStorage) -> int:
         print(f"Grouped by: {result['group_by']}")
         print(f"Total: {result['total']}")
         print()
-        for key, count in result['groups'].items():
-            bar = "█" * (count * 30 // max(result['groups'].values())) if result['groups'] else ""
+        for key, count in result["groups"].items():
+            bar = "█" * (count * 30 // max(result["groups"].values())) if result["groups"] else ""
             print(f"  {key}: {bar} ({count})")
 
     return 0
@@ -332,7 +340,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to database file (default: ~/.claude/contrib/agent-memory-store/memories.db)",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Verbose output (show all fields)",
     )
@@ -348,8 +357,7 @@ def main(argv: list[str] | None = None) -> int:
     store_parser.add_argument("--created-by", help="Creator identifier")
     store_parser.add_argument("--ttl", type=int, help="Time-to-live in days")
     store_parser.add_argument(
-        "-i", "--importance", type=int, default=5,
-        help="Importance (1-10, default 5)"
+        "-i", "--importance", type=int, default=5, help="Importance (1-10, default 5)"
     )
 
     # recall command
@@ -389,11 +397,18 @@ def main(argv: list[str] | None = None) -> int:
     query_parser.add_argument("--created-before", help="Created before (ISO datetime)")
     query_parser.add_argument("--updated-after", help="Updated after (ISO datetime)")
     query_parser.add_argument("--min-access", type=int, help="Minimum access count")
-    query_parser.add_argument("--never-accessed", action="store_true", help="Only never-accessed memories")
-    query_parser.add_argument("--order-by", default="updated_at",
-                              choices=["created_at", "updated_at", "importance", "access_count", "key"],
-                              help="Sort field")
-    query_parser.add_argument("--asc", action="store_true", help="Sort ascending (default: descending)")
+    query_parser.add_argument(
+        "--never-accessed", action="store_true", help="Only never-accessed memories"
+    )
+    query_parser.add_argument(
+        "--order-by",
+        default="updated_at",
+        choices=["created_at", "updated_at", "importance", "access_count", "key"],
+        help="Sort field",
+    )
+    query_parser.add_argument(
+        "--asc", action="store_true", help="Sort ascending (default: descending)"
+    )
     query_parser.add_argument("-l", "--limit", type=int, default=50, help="Max results")
     query_parser.add_argument("--offset", type=int, default=0, help="Skip first N results")
     query_parser.add_argument("--keys-only", action="store_true", help="Print only keys")
@@ -404,24 +419,40 @@ def main(argv: list[str] | None = None) -> int:
     explore_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # search command (weighted)
-    search_parser = subparsers.add_parser("search", help="Weighted search (recency × importance × relevance)")
+    search_parser = subparsers.add_parser(
+        "search", help="Weighted search (recency × importance × relevance)"
+    )
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument("-n", "--namespace", default="global", help="Namespace filter")
     search_parser.add_argument("-t", "--tags", help="Comma-separated tags filter")
     search_parser.add_argument("-l", "--limit", type=int, default=10, help="Max results")
-    search_parser.add_argument("--recency-weight", type=float, default=1.0, help="Weight for recency")
-    search_parser.add_argument("--importance-weight", type=float, default=1.0, help="Weight for importance")
-    search_parser.add_argument("--relevance-weight", type=float, default=1.0, help="Weight for relevance")
-    search_parser.add_argument("--decay-days", type=float, default=30.0, help="Days until recency decays to ~37%%")
+    search_parser.add_argument(
+        "--recency-weight", type=float, default=1.0, help="Weight for recency"
+    )
+    search_parser.add_argument(
+        "--importance-weight", type=float, default=1.0, help="Weight for importance"
+    )
+    search_parser.add_argument(
+        "--relevance-weight", type=float, default=1.0, help="Weight for relevance"
+    )
+    search_parser.add_argument(
+        "--decay-days", type=float, default=30.0, help="Days until recency decays to ~37%%"
+    )
     search_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # aggregate command
     agg_parser = subparsers.add_parser("aggregate", help="Aggregate memories by dimension")
-    agg_parser.add_argument("group_by", nargs="?", default="namespace",
-                            choices=["namespace", "tag", "importance", "date"],
-                            help="Dimension to group by")
+    agg_parser.add_argument(
+        "group_by",
+        nargs="?",
+        default="namespace",
+        choices=["namespace", "tag", "importance", "date"],
+        help="Dimension to group by",
+    )
     agg_parser.add_argument("-n", "--namespace", help="Filter by namespace before aggregating")
-    agg_parser.add_argument("--min-importance", type=int, help="Filter by min importance before aggregating")
+    agg_parser.add_argument(
+        "--min-importance", type=int, help="Filter by min importance before aggregating"
+    )
     agg_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args(argv)

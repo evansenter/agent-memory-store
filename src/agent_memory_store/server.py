@@ -12,7 +12,9 @@ from mcp.server import Server
 from .storage import MemoryStorage, QueryFilters
 
 # Initialize storage
-DB_PATH = os.environ.get("MEMORY_STORE_DB", Path.home() / ".claude" / "contrib" / "agent-memory-store" / "memories.db")
+DB_PATH = os.environ.get(
+    "MEMORY_STORE_DB", Path.home() / ".claude" / "contrib" / "agent-memory-store" / "memories.db"
+)
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 storage = MemoryStorage(DB_PATH)
 
@@ -79,6 +81,11 @@ async def list_tools() -> list[types.Tool]:
                     "ttl_days": {
                         "type": "integer",
                         "description": "Days until memory expires (optional)",
+                    },
+                    "importance": {
+                        "type": "integer",
+                        "description": "Importance (1-10, default 5)",
+                        "default": 5,
                     },
                 },
                 "required": ["key", "value"],
@@ -165,8 +172,10 @@ async def list_tools() -> list[types.Tool]:
         # Symbolic Query Layer (RLM-inspired)
         types.Tool(
             name="memory_query",
-            description="Execute structured queries with symbolic filters (regex, date ranges, importance). "
-            "Use this for code-based memory exploration before semantic search.",
+            description=(
+                "Execute structured queries with symbolic filters (regex, dates, importance). "
+                "Use this for code-based memory exploration before semantic search."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -250,8 +259,10 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="memory_explore",
-            description="Get statistics about the memory store: counts, namespaces, tags, importance distribution. "
-            "Use this to understand what's available before querying.",
+            description=(
+                "Get statistics about the memory store: counts, namespaces, tags, "
+                "importance distribution. Use this to understand what's available."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -259,8 +270,10 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="memory_search_weighted",
-            description="Search with combined recency × importance × relevance scoring (Generative Agents model). "
-            "Returns memories ranked by weighted combination of how recent, how important, and how relevant.",
+            description=(
+                "Search with combined recency × importance × relevance scoring. "
+                "Returns memories ranked by how recent, important, and relevant."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -343,6 +356,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             namespace=arguments.get("namespace", "global"),
             tags=arguments.get("tags"),
             ttl_days=arguments.get("ttl_days"),
+            importance=arguments.get("importance", 5),
         )
         return [
             types.TextContent(
@@ -479,7 +493,6 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     elif name == "memory_list":
         since = None
         if "since_days" in arguments:
-
             since = datetime.now(UTC) - timedelta(days=arguments["since_days"])
 
         memories = storage.list_memories(
@@ -578,8 +591,12 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                         "top_tags": stats.tags,
                         "importance_distribution": stats.importance_distribution,
                         "date_range": {
-                            "oldest": stats.date_range[0].isoformat() if stats.date_range[0] else None,
-                            "newest": stats.date_range[1].isoformat() if stats.date_range[1] else None,
+                            "oldest": stats.date_range[0].isoformat()
+                            if stats.date_range[0]
+                            else None,
+                            "newest": stats.date_range[1].isoformat()
+                            if stats.date_range[1]
+                            else None,
                         },
                         "avg_importance": stats.avg_importance,
                         "total_access_count": stats.total_access_count,
@@ -610,7 +627,9 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                         "memories": [
                             {
                                 "key": sm.memory.key,
-                                "value": sm.memory.value[:200] + "..." if len(sm.memory.value) > 200 else sm.memory.value,
+                                "value": sm.memory.value[:200] + "..."
+                                if len(sm.memory.value) > 200
+                                else sm.memory.value,
                                 "namespace": sm.memory.namespace,
                                 "tags": sm.memory.tags,
                                 "importance": sm.memory.importance,
@@ -647,7 +666,12 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             )
         ]
 
-    return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
+    return [
+        types.TextContent(
+            type="text",
+            text=json.dumps({"success": False, "error": f"Unknown tool: {name}"}),
+        )
+    ]
 
 
 async def main():

@@ -1,9 +1,8 @@
-from datetime import UTC, datetime, timedelta
 """Unit tests for storage.py - CRUD, FTS5, and TTL functionality."""
 
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from agent_memory_store.storage import Memory, MemoryStorage
 
@@ -61,15 +60,13 @@ class TestMemoryStorageInit:
 
     def test_creates_database_file(self, temp_db):
         """Test that initializing storage creates the database file."""
-        storage = MemoryStorage(temp_db)
+        MemoryStorage(temp_db)
         assert temp_db.exists()
 
     def test_creates_tables(self, storage, temp_db):
         """Test that required tables are created."""
         with sqlite3.connect(temp_db) as conn:
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = {row[0] for row in cursor.fetchall()}
 
         assert "memories" in tables
@@ -78,9 +75,7 @@ class TestMemoryStorageInit:
     def test_creates_indexes(self, storage, temp_db):
         """Test that required indexes are created."""
         with sqlite3.connect(temp_db) as conn:
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='index'"
-            )
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
             indexes = {row[0] for row in cursor.fetchall()}
 
         assert "idx_memories_namespace" in indexes
@@ -89,9 +84,7 @@ class TestMemoryStorageInit:
     def test_creates_fts_triggers(self, storage, temp_db):
         """Test that FTS sync triggers are created."""
         with sqlite3.connect(temp_db) as conn:
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='trigger'"
-            )
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
             triggers = {row[0] for row in cursor.fetchall()}
 
         assert "memories_ai" in triggers  # After insert
@@ -116,23 +109,17 @@ class TestCRUDOperations:
 
     def test_store_with_namespace(self, storage):
         """Test storing with a custom namespace."""
-        memory = storage.store(
-            key="config", value="debug=true", namespace="project:myapp"
-        )
+        memory = storage.store(key="config", value="debug=true", namespace="project:myapp")
         assert memory.namespace == "project:myapp"
 
     def test_store_with_tags(self, storage):
         """Test storing with tags."""
-        memory = storage.store(
-            key="note", value="Important note", tags=["important", "todo"]
-        )
+        memory = storage.store(key="note", value="Important note", tags=["important", "todo"])
         assert memory.tags == ["important", "todo"]
 
     def test_store_with_created_by(self, storage):
         """Test storing with created_by field."""
-        memory = storage.store(
-            key="agent-note", value="Agent observation", created_by="claude-1"
-        )
+        memory = storage.store(key="agent-note", value="Agent observation", created_by="claude-1")
         assert memory.created_by == "claude-1"
 
     def test_store_update_existing(self, storage):
@@ -299,9 +286,7 @@ class TestTTL:
 
         with sqlite3.connect(temp_db) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT expires_at FROM memories WHERE key = ?", ("timed",)
-            )
+            cursor = conn.execute("SELECT expires_at FROM memories WHERE key = ?", ("timed",))
             row = cursor.fetchone()
 
         assert row["expires_at"] is not None
@@ -442,7 +427,7 @@ class TestEdgeCases:
 
     def test_unicode_content(self, storage):
         """Test handling of unicode characters."""
-        memory = storage.store(
+        storage.store(
             key="unicode",
             value="Hello 世界 🌍 café",
             tags=["日本語", "emoji"],
@@ -455,14 +440,14 @@ class TestEdgeCases:
     def test_large_value(self, storage):
         """Test handling of large values."""
         large_text = "x" * 100000
-        memory = storage.store(key="large", value=large_text)
+        storage.store(key="large", value=large_text)
 
         recalled = storage.recall_by_key("large")
         assert len(recalled.value) == 100000
 
     def test_special_characters_in_key(self, storage):
         """Test keys with special characters."""
-        memory = storage.store(key="path/to/resource", value="data")
+        storage.store(key="path/to/resource", value="data")
         recalled = storage.recall_by_key("path/to/resource")
         assert recalled is not None
 
@@ -474,7 +459,7 @@ class TestEdgeCases:
     def test_json_in_value(self, storage):
         """Test storing JSON data as value."""
         data = {"nested": {"key": "value"}, "list": [1, 2, 3]}
-        memory = storage.store(key="json-data", value=json.dumps(data))
+        storage.store(key="json-data", value=json.dumps(data))
 
         recalled = storage.recall_by_key("json-data")
         parsed = json.loads(recalled.value)

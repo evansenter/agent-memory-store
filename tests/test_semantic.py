@@ -69,10 +69,7 @@ class TestSemanticSearchAvailability:
             assert isinstance(score, float)
 
 
-@pytest.mark.skipif(
-    not embeddings.is_available(),
-    reason="sentence-transformers not installed"
-)
+@pytest.mark.skipif(not embeddings.is_available(), reason="sentence-transformers not installed")
 class TestSemanticSearchWithEmbeddings:
     """Tests that require sentence-transformers to be installed."""
 
@@ -115,15 +112,13 @@ class TestSemanticSearchWithEmbeddings:
         # Store memories with different content
         semantic_storage.store(
             key="python-intro",
-            value="Python is a high-level programming language known for readability"
+            value="Python is a high-level programming language known for readability",
         )
         semantic_storage.store(
-            key="js-intro",
-            value="JavaScript is used for web development and runs in browsers"
+            key="js-intro", value="JavaScript is used for web development and runs in browsers"
         )
         semantic_storage.store(
-            key="cooking-tips",
-            value="To make a great pasta, boil water with salt first"
+            key="cooking-tips", value="To make a great pasta, boil water with salt first"
         )
 
         # Search for something related to programming
@@ -137,20 +132,13 @@ class TestSemanticSearchWithEmbeddings:
     def test_semantic_search_with_namespace_filter(self, semantic_storage):
         """Test semantic search respects namespace filter."""
         semantic_storage.store(
-            key="proj-a-doc",
-            value="Machine learning model training",
-            namespace="project:a"
+            key="proj-a-doc", value="Machine learning model training", namespace="project:a"
         )
         semantic_storage.store(
-            key="proj-b-doc",
-            value="Machine learning inference",
-            namespace="project:b"
+            key="proj-b-doc", value="Machine learning inference", namespace="project:b"
         )
 
-        results = semantic_storage.search_semantic(
-            "ML models",
-            namespace="project:a"
-        )
+        results = semantic_storage.search_semantic("ML models", namespace="project:a")
 
         assert len(results) == 1
         assert results[0][0].key == "proj-a-doc"
@@ -158,20 +146,11 @@ class TestSemanticSearchWithEmbeddings:
     def test_semantic_search_with_tags_filter(self, semantic_storage):
         """Test semantic search respects tags filter."""
         semantic_storage.store(
-            key="urgent-task",
-            value="Complete the API documentation",
-            tags=["urgent", "docs"]
+            key="urgent-task", value="Complete the API documentation", tags=["urgent", "docs"]
         )
-        semantic_storage.store(
-            key="normal-task",
-            value="Write API examples",
-            tags=["docs"]
-        )
+        semantic_storage.store(key="normal-task", value="Write API examples", tags=["docs"])
 
-        results = semantic_storage.search_semantic(
-            "documentation",
-            tags=["urgent"]
-        )
+        results = semantic_storage.search_semantic("documentation", tags=["urgent"])
 
         assert len(results) == 1
         assert results[0][0].key == "urgent-task"
@@ -189,20 +168,14 @@ class TestSemanticSearchWithEmbeddings:
     def test_embedding_update_on_memory_update(self, semantic_storage):
         """Test that embeddings are updated when a memory is updated."""
         # Store initial memory
-        semantic_storage.store(
-            key="evolving",
-            value="I love cats and kittens"
-        )
+        semantic_storage.store(key="evolving", value="I love cats and kittens")
 
         # Search should find it with cat-related query
         results1 = semantic_storage.search_semantic("feline pets")
         assert any(m.key == "evolving" for m, _ in results1)
 
         # Update the memory to be about something completely different
-        semantic_storage.store(
-            key="evolving",
-            value="Quantum computing uses qubits"
-        )
+        semantic_storage.store(key="evolving", value="Quantum computing uses qubits")
 
         # Now it should match quantum-related queries better
         results2 = semantic_storage.search_semantic("quantum physics")
@@ -210,10 +183,7 @@ class TestSemanticSearchWithEmbeddings:
 
     def test_embedding_deleted_with_memory(self, semantic_storage):
         """Test that embeddings are deleted when memory is deleted."""
-        semantic_storage.store(
-            key="temporary",
-            value="This will be deleted soon"
-        )
+        semantic_storage.store(key="temporary", value="This will be deleted soon")
 
         # Verify it's searchable
         results1 = semantic_storage.search_semantic("deleted")

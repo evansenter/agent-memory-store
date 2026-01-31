@@ -3,7 +3,6 @@
 import json
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -63,16 +62,12 @@ class TestStore:
 
     def test_store_with_ttl(self, temp_db):
         """Test storing with TTL."""
-        result = run_cli(
-            "store", "test-key", "test value", "--ttl", "7", db_path=temp_db
-        )
+        result = run_cli("store", "test-key", "test value", "--ttl", "7", db_path=temp_db)
         assert result.returncode == 0
 
     def test_store_unicode(self, temp_db):
         """Test storing unicode values."""
-        result = run_cli(
-            "store", "unicode-key", "Hello 世界! 🌍", db_path=temp_db
-        )
+        result = run_cli("store", "unicode-key", "Hello 世界! 🌍", db_path=temp_db)
         assert result.returncode == 0
 
     def test_store_update(self, temp_db):
