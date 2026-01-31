@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+
 # We need to patch the DB_PATH before importing the server module
 @pytest.fixture
 def temp_db_path():
@@ -23,6 +24,7 @@ def server_module(temp_db_path):
     with patch.dict(os.environ, {"MEMORY_STORE_DB": temp_db_path}):
         # Force reimport to pick up the new DB path
         import importlib
+
         import agent_memory_store.server as server_mod
         importlib.reload(server_mod)
         yield server_mod

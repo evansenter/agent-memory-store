@@ -68,7 +68,13 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "query": {
                         "type": "string",
-                        "description": "Search query (full-text search)",
+                        "description": "Search query (full-text or semantic)",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "semantic"],
+                        "description": "Search mode: 'fts' or 'semantic' (vector similarity)",
+                        "default": "fts",
                     },
                     "namespace": {
                         "type": "string",
@@ -186,32 +192,72 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 ]
 
         elif "query" in arguments and arguments["query"]:
-            memories = storage.search(
-                query=arguments["query"],
-                namespace=arguments.get("namespace"),
-                tags=arguments.get("tags"),
-                limit=arguments.get("limit", 10),
-            )
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(
-                        {
-                            "success": True,
-                            "count": len(memories),
-                            "memories": [
-                                {
-                                    "key": m.key,
-                                    "value": m.value,
-                                    "namespace": m.namespace,
-                                    "tags": m.tags,
-                                }
-                                for m in memories
-                            ],
-                        }
-                    ),
+            mode = arguments.get("mode", "fts")
+            limit = arguments.get("limit", 10)
+            namespace = arguments.get("namespace")
+            tags = arguments.get("tags")
+
+            if mode == "semantic":
+                # Semantic search returns (memory, score) tuples
+                results = storage.search_semantic(
+                    query=arguments["query"],
+                    namespace=namespace,
+                    tags=tags,
+                    limit=limit,
                 )
-            ]
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {
+                                "success": True,
+                                "mode": (
+                                    "semantic" if storage.semantic_available else "fts_fallback"
+                                ),
+                                "count": len(results),
+                                "memories": [
+                                    {
+                                        "key": m.key,
+                                        "value": m.value,
+                                        "namespace": m.namespace,
+                                        "tags": m.tags,
+                                        "score": round(score, 4),
+                                    }
+                                    for m, score in results
+                                ],
+                            }
+                        ),
+                    )
+                ]
+            else:
+                # FTS search
+                memories = storage.search(
+                    query=arguments["query"],
+                    namespace=namespace,
+                    tags=tags,
+                    limit=limit,
+                )
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {
+                                "success": True,
+                                "mode": "fts",
+                                "count": len(memories),
+                                "memories": [
+                                    {
+                                        "key": m.key,
+                                        "value": m.value,
+                                        "namespace": m.namespace,
+                                        "tags": m.tags,
+                                    }
+                                    for m in memories
+                                ],
+                            }
+                        ),
+                    )
+                ]
         else:
             return [
                 types.TextContent(
