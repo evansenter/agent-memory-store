@@ -12,10 +12,14 @@ similarity search (with optional embeddings).
 
 | Tool | Purpose |
 |------|---------|
-| `memory_store(key, value, namespace?, tags?, ttl_days?)` | Store a memory |
-| `memory_recall(key?, query?, mode?, namespace?, tags?, limit?)` | Retrieve memories |
-| `memory_forget(key)` | Delete a memory |
-| `memory_list(namespace?, tags?, since_days?, limit?)` | List memories with filters |
+| `memory_store` | Store a memory with key, value, importance |
+| `memory_recall` | Retrieve by key or search (fts/semantic) |
+| `memory_forget` | Delete a memory by key |
+| `memory_list` | List memories with filters |
+| `memory_query` | Structured query (regex, date ranges, importance) |
+| `memory_explore` | Get statistics before querying |
+| `memory_search_weighted` | Recency × importance × relevance scoring |
+| `memory_aggregate` | Group by namespace/tag/importance/date |
 
 ## Quick Start
 
@@ -213,7 +217,8 @@ memory_store(
   value: str,         # Content to store (required)
   namespace: str,     # Scope: "global", "project:X", "session:X" (default: "global")
   tags: list[str],    # Categorization tags (optional)
-  ttl_days: int       # Days until expiration (optional)
+  ttl_days: int,      # Days until expiration (optional)
+  importance: int     # Priority 1-10 (default: 5)
 )
 ```
 
@@ -244,4 +249,74 @@ memory_list(
   since_days: int,    # Only memories from last N days (optional)
   limit: int          # Max results (default: 20)
 )
+```
+
+### memory_query
+Structured query with symbolic filters. Use for precise, programmatic exploration.
+
+```
+memory_query(
+  key_pattern: str,     # Regex pattern for keys (optional)
+  value_pattern: str,   # Regex pattern for values (optional)
+  text_contains: str,   # Substring in key or value (optional)
+  namespace: str,       # Filter by namespace (optional)
+  tags: list[str],      # Match any of these tags (optional)
+  has_all_tags: list,   # Match ALL of these tags (optional)
+  min_importance: int,  # Minimum importance 1-10 (optional)
+  max_importance: int,  # Maximum importance 1-10 (optional)
+  created_after: str,   # ISO datetime (optional)
+  created_before: str,  # ISO datetime (optional)
+  updated_after: str,   # ISO datetime (optional)
+  min_access_count: int,# Minimum access count (optional)
+  never_accessed: bool, # Only unaccessed memories (optional)
+  order_by: str,        # "created_at", "updated_at", "importance", "access_count", "key"
+  order_desc: bool,     # Sort descending (default: true)
+  limit: int,           # Max results (default: 50)
+  offset: int           # Pagination offset (default: 0)
+)
+```
+
+### memory_explore
+Get statistics about the memory store before querying.
+
+```
+memory_explore()
+→ {
+    total_count: 42,
+    namespaces: {"global": 30, "project:myapp": 12},
+    top_tags: {"pattern": 8, "gotcha": 5, ...},
+    importance_distribution: {"5": 20, "7": 10, ...},
+    date_range: {oldest: "2024-01-01T...", newest: "2024-03-15T..."},
+    avg_importance: 5.2,
+    semantic_available: true
+  }
+```
+
+### memory_search_weighted
+Search with combined recency × importance × relevance scoring.
+
+```
+memory_search_weighted(
+  query: str,             # Search query (required)
+  namespace: str,         # Filter by namespace (optional)
+  tags: list[str],        # Filter by tags (optional)
+  limit: int,             # Max results (default: 10)
+  recency_weight: float,  # Weight for recency (default: 1.0)
+  importance_weight: float, # Weight for importance (default: 1.0)
+  relevance_weight: float,  # Weight for FTS relevance (default: 1.0)
+  recency_decay_days: float # Days until recency decays to ~37% (default: 30)
+)
+→ {memories: [{..., score: 0.85, recency_score: 0.9, importance_score: 0.7, relevance_score: 0.8}]}
+```
+
+### memory_aggregate
+Group memories by dimension without loading full content.
+
+```
+memory_aggregate(
+  group_by: str,        # "namespace", "tag", "importance", or "date"
+  namespace: str,       # Pre-filter by namespace (optional)
+  min_importance: int   # Pre-filter by importance (optional)
+)
+→ {group_by: "namespace", groups: {"global": 30, "project:myapp": 12}}
 ```

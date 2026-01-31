@@ -1,7 +1,6 @@
 """Tests for the symbolic query layer (RLM-inspired features)."""
 
-import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 
@@ -63,7 +62,7 @@ class TestQueryFilters:
         """Test filtering by namespace."""
         filters = QueryFilters(namespace="project:foo")
         results = populated_storage.query(filters)
-        
+
         assert len(results) == 2
         assert all(m.namespace == "project:foo" for m in results)
 
@@ -71,7 +70,7 @@ class TestQueryFilters:
         """Test filtering by importance range."""
         filters = QueryFilters(min_importance=8, max_importance=10)
         results = populated_storage.query(filters)
-        
+
         assert len(results) == 3
         assert all(8 <= m.importance <= 10 for m in results)
 
@@ -79,7 +78,7 @@ class TestQueryFilters:
         """Test substring matching."""
         filters = QueryFilters(text_contains="API")
         results = populated_storage.query(filters)
-        
+
         assert len(results) >= 2
         assert any("API" in m.value or "API" in m.key for m in results)
 
@@ -87,7 +86,7 @@ class TestQueryFilters:
         """Test regex pattern matching on keys."""
         filters = QueryFilters(key_pattern=r"^api-.*")
         results = populated_storage.query(filters)
-        
+
         assert len(results) == 1
         assert results[0].key == "api-auth-pattern"
 
@@ -95,7 +94,7 @@ class TestQueryFilters:
         """Test regex pattern matching on values."""
         filters = QueryFilters(value_pattern=r"us-east-\d+")
         results = populated_storage.query(filters)
-        
+
         assert len(results) == 1
         assert "us-east-1" in results[0].value
 
@@ -103,14 +102,14 @@ class TestQueryFilters:
         """Test matching any of given tags."""
         filters = QueryFilters(has_any_tag=["critical", "meeting"])
         results = populated_storage.query(filters)
-        
+
         assert len(results) == 3  # bug-fix, meeting-notes, deployment-config
 
     def test_query_by_tags_all(self, populated_storage):
         """Test matching all of given tags."""
         filters = QueryFilters(has_all_tags=["config", "critical"])
         results = populated_storage.query(filters)
-        
+
         assert len(results) == 1
         assert results[0].key == "deployment-config"
 
@@ -118,7 +117,7 @@ class TestQueryFilters:
         """Test ordering by importance."""
         filters = QueryFilters(order_by="importance", order_desc=True, limit=3)
         results = populated_storage.query(filters)
-        
+
         assert len(results) == 3
         assert results[0].importance >= results[1].importance >= results[2].importance
         assert results[0].importance == 10
@@ -127,10 +126,10 @@ class TestQueryFilters:
         """Test limit and offset."""
         filters1 = QueryFilters(limit=2, offset=0, order_by="key", order_desc=False)
         filters2 = QueryFilters(limit=2, offset=2, order_by="key", order_desc=False)
-        
+
         page1 = populated_storage.query(filters1)
         page2 = populated_storage.query(filters2)
-        
+
         assert len(page1) == 2
         assert len(page2) == 2
         assert page1[0].key != page2[0].key
@@ -139,10 +138,10 @@ class TestQueryFilters:
         """Test filtering for never-accessed memories."""
         # Access one memory
         populated_storage.recall_by_key("api-auth-pattern")
-        
+
         filters = QueryFilters(never_accessed=True)
         results = populated_storage.query(filters)
-        
+
         # All except api-auth-pattern
         assert len(results) == 4
         assert all(m.key != "api-auth-pattern" for m in results)
@@ -154,7 +153,7 @@ class TestExplore:
     def test_explore_empty_store(self, storage):
         """Test exploring empty store."""
         stats = storage.explore()
-        
+
         assert stats.total_count == 0
         assert stats.namespaces == {}
         assert stats.tags == {}
@@ -163,7 +162,7 @@ class TestExplore:
     def test_explore_with_data(self, populated_storage):
         """Test exploring populated store."""
         stats = populated_storage.explore()
-        
+
         assert stats.total_count == 5
         assert "project:foo" in stats.namespaces
         assert stats.namespaces["project:foo"] == 2
@@ -175,7 +174,7 @@ class TestExplore:
     def test_explore_importance_distribution(self, populated_storage):
         """Test importance distribution in stats."""
         stats = populated_storage.explore()
-        
+
         assert stats.importance_distribution is not None
         # Should have entries for various importance levels
         assert sum(stats.importance_distribution.values()) == 5
@@ -187,7 +186,7 @@ class TestSearchWeighted:
     def test_search_weighted_returns_scored_memories(self, populated_storage):
         """Test that weighted search returns ScoredMemory objects."""
         results = populated_storage.search_weighted("API authentication")
-        
+
         assert all(isinstance(r, ScoredMemory) for r in results)
         assert all(hasattr(r, "recency_score") for r in results)
         assert all(hasattr(r, "importance_score") for r in results)
@@ -202,7 +201,7 @@ class TestSearchWeighted:
             recency_weight=0.0,
             relevance_weight=1.0,
         )
-        
+
         # deployment-config has importance 10, should be near top
         keys = [r.memory.key for r in results[:3]]
         assert "deployment-config" in keys
@@ -215,7 +214,7 @@ class TestSearchWeighted:
             importance_weight=0.0,
             relevance_weight=0.0,
         )
-        
+
         # All recently created, so recency scores should be high (close to 1)
         assert all(r.recency_score > 0.9 for r in results)
 
@@ -229,7 +228,7 @@ class TestSearchWeighted:
             relevance_weight=1.0,
             limit=1,
         )
-        
+
         assert len(results) >= 1
         # Should find the API auth pattern
         # Score should equal just relevance_score (since other weights are 0)
@@ -241,7 +240,7 @@ class TestSearchWeighted:
             "API",
             namespace="project:foo",
         )
-        
+
         assert all(r.memory.namespace == "project:foo" for r in results)
 
 
@@ -251,7 +250,7 @@ class TestAggregate:
     def test_aggregate_by_namespace(self, populated_storage):
         """Test aggregating by namespace."""
         result = populated_storage.aggregate(group_by="namespace")
-        
+
         assert result["group_by"] == "namespace"
         assert result["total"] == 5
         assert "project:foo" in result["groups"]
@@ -260,21 +259,21 @@ class TestAggregate:
     def test_aggregate_by_tag(self, populated_storage):
         """Test aggregating by tag."""
         result = populated_storage.aggregate(group_by="tag")
-        
+
         assert "critical" in result["groups"]
         assert result["groups"]["critical"] == 2  # bug-fix and deployment
 
     def test_aggregate_by_importance(self, populated_storage):
         """Test aggregating by importance level."""
         result = populated_storage.aggregate(group_by="importance")
-        
+
         assert 10 in result["groups"]
         assert result["groups"][10] == 1  # deployment-config
 
     def test_aggregate_by_date(self, populated_storage):
         """Test aggregating by date."""
         result = populated_storage.aggregate(group_by="date")
-        
+
         # All created today
         today = datetime.now(UTC).strftime("%Y-%m-%d")
         assert today in result["groups"]
@@ -283,7 +282,7 @@ class TestAggregate:
         """Test aggregating with pre-filters."""
         filters = QueryFilters(min_importance=8)
         result = populated_storage.aggregate(group_by="namespace", filters=filters)
-        
+
         assert result["total"] == 3  # Only high importance memories
 
 
@@ -303,7 +302,7 @@ class TestRecencyScoring:
             value="Minor code style preference",
             importance=2,
         )
-        
+
         # With balanced weights, importance should win
         results = storage.search_weighted(
             "code decision",
@@ -311,7 +310,7 @@ class TestRecencyScoring:
             importance_weight=2.0,  # Weight importance higher
             relevance_weight=1.0,
         )
-        
+
         # Higher importance should rank first
         if len(results) >= 2:
             assert results[0].memory.importance >= results[1].memory.importance
@@ -319,13 +318,13 @@ class TestRecencyScoring:
     def test_recency_decay_parameter(self, storage):
         """Test that decay_days parameter affects recency scoring."""
         storage.store(key="test", value="test memory", importance=5)
-        
+
         # With very short decay, recency drops fast (but all are recent so still high)
         results_short = storage.search_weighted("test", recency_decay_days=1.0)
-        
+
         # With very long decay, recency stays high longer
         results_long = storage.search_weighted("test", recency_decay_days=365.0)
-        
+
         # Both should find the memory
         assert len(results_short) >= 1
         assert len(results_long) >= 1
@@ -336,15 +335,15 @@ class TestRecencyScoring:
         """Test that importance is normalized to 0-1."""
         storage.store(key="min", value="minimum importance", importance=1)
         storage.store(key="max", value="maximum importance", importance=10)
-        
+
         results = storage.search_weighted("importance", relevance_weight=0.0, recency_weight=0.0)
-        
+
         for r in results:
             assert 0.0 <= r.importance_score <= 1.0
-        
+
         # Find min and max
         min_mem = next(r for r in results if r.memory.key == "min")
         max_mem = next(r for r in results if r.memory.key == "max")
-        
+
         assert min_mem.importance_score == 0.0  # (1-1)/9 = 0
         assert max_mem.importance_score == 1.0  # (10-1)/9 = 1

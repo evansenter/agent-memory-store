@@ -2,11 +2,12 @@
 
 import json
 import logging
+import math
 import re
 import sqlite3
 import struct
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -80,7 +81,9 @@ class QueryFilters:
     offset: int = 0
 
     # Sorting
-    order_by: Literal["created_at", "updated_at", "importance", "access_count", "key"] = "updated_at"
+    order_by: Literal["created_at", "updated_at", "importance", "access_count", "key"] = (
+        "updated_at"
+    )
     order_desc: bool = True
 
 
@@ -153,15 +156,17 @@ class MemoryStorage:
                 CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace);
                 CREATE INDEX IF NOT EXISTS idx_memories_expires ON memories(expires_at);
             """)
-            
+
             # Migration: Add importance column if it doesn't exist
             cursor = conn.execute("PRAGMA table_info(memories)")
             columns = [row[1] for row in cursor.fetchall()]
             if "importance" not in columns:
                 conn.execute("ALTER TABLE memories ADD COLUMN importance INTEGER DEFAULT 5")
-            
+
             # Create importance index (after migration ensures column exists)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance)"
+            )
 
             # Create FTS5 virtual table if not exists
             cursor = conn.execute(
@@ -218,8 +223,8 @@ class MemoryStorage:
                 conn.enable_load_extension(True)
                 sqlite_vec.load(conn)
                 conn.enable_load_extension(False)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load sqlite-vec on connection: {e}")
         return conn
 
     def store(
@@ -233,7 +238,7 @@ class MemoryStorage:
         importance: int = 5,
     ) -> Memory:
         """Store a memory, replacing if key exists.
-        
+
         Args:
             importance: 1-10 scale (1=trivial, 5=normal, 10=critical)
         """
@@ -243,7 +248,6 @@ class MemoryStorage:
         expires_at = None
         importance = max(1, min(10, importance))  # Clamp to 1-10
         if ttl_days:
-
             expires_at = (datetime.now(UTC) + timedelta(days=ttl_days)).isoformat()
 
         # Generate embedding if available
@@ -261,7 +265,8 @@ class MemoryStorage:
 
             conn.execute(
                 """
-                INSERT INTO memories (id, key, value, namespace, tags, created_at, updated_at, created_by, expires_at, importance)
+                INSERT INTO memories (id, key, value, namespace, tags, created_at,
+                    updated_at, created_by, expires_at, importance)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET
                     value = excluded.value,
@@ -271,7 +276,18 @@ class MemoryStorage:
                     expires_at = excluded.expires_at,
                     importance = excluded.importance
                 """,
-                (memory_id, key, value, namespace, tags_json, now, now, created_by, expires_at, importance),
+                (
+                    memory_id,
+                    key,
+                    value,
+                    namespace,
+                    tags_json,
+                    now,
+                    now,
+                    created_by,
+                    expires_at,
+                    importance,
+                ),
             )
 
             # Store embedding if available
@@ -289,8 +305,10 @@ class MemoryStorage:
                     (vec_id, embedding_bytes),
                 )
 
+        # Use existing id for updates, new id for inserts
+        final_id = existing_id if existing_id else memory_id
         return Memory(
-            id=memory_id,
+            id=final_id,
             key=key,
             value=value,
             namespace=namespace,
@@ -328,7 +346,7 @@ class MemoryStorage:
 
     def _escape_fts5_query(self, query: str) -> str:
         """Escape a query string for FTS5 MATCH.
-        
+
         FTS5 interprets hyphens, colons, etc. as operators. We escape by
         double-quoting each word to treat them as literals.
         """
@@ -532,9 +550,7 @@ class MemoryStorage:
             expires_at=datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None,
             access_count=row["access_count"],
             last_accessed_at=(
-                datetime.fromisoformat(row["last_accessed_at"])
-                if row["last_accessed_at"]
-                else None
+                datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None
             ),
             importance=row["importance"] if "importance" in row.keys() else 5,
         )
@@ -545,13 +561,13 @@ class MemoryStorage:
 
     def query(self, filters: QueryFilters) -> list[Memory]:
         """Execute a structured query with symbolic filters.
-        
+
         This enables code-based filtering before semantic search,
         allowing agents to programmatically explore memories.
-        
+
         Args:
             filters: QueryFilters specifying constraints.
-            
+
         Returns:
             List of matching memories.
         """
@@ -604,8 +620,11 @@ class MemoryStorage:
                 pattern = f"%{filters.text_contains}%"
                 params.extend([pattern, pattern])
 
-            # Sorting
-            order_col = filters.order_by
+            # Sorting (validate order_by against allowlist to prevent SQL injection)
+            valid_order_columns = {"created_at", "updated_at", "importance", "access_count", "key"}
+            order_col = (
+                filters.order_by if filters.order_by in valid_order_columns else "updated_at"
+            )
             order_dir = "DESC" if filters.order_desc else "ASC"
             sql += f" ORDER BY {order_col} {order_dir}"
 
@@ -638,9 +657,9 @@ class MemoryStorage:
 
     def explore(self) -> MemoryStats:
         """Get statistics about the memory store.
-        
+
         Useful for agents to understand what's available before querying.
-        
+
         Returns:
             MemoryStats with counts, distributions, and metadata.
         """
@@ -682,9 +701,7 @@ class MemoryStorage:
             avg_importance = avg_row["avg_imp"] or 0.0
 
             # Total access count
-            access_row = conn.execute(
-                "SELECT SUM(access_count) as total FROM memories"
-            ).fetchone()
+            access_row = conn.execute("SELECT SUM(access_count) as total FROM memories").fetchone()
             total_access = access_row["total"] or 0
 
             return MemoryStats(
@@ -710,13 +727,13 @@ class MemoryStorage:
         recency_decay_days: float = 30.0,
     ) -> list[ScoredMemory]:
         """Search with combined recency × importance × relevance scoring.
-        
+
         Implements the Generative Agents retrieval model where memories
         are scored by a weighted combination of:
         - Recency: How recently the memory was created/updated
         - Importance: The stored importance value (1-10)
         - Relevance: Semantic similarity to the query
-        
+
         Args:
             query: Search query for relevance scoring.
             namespace: Optional namespace filter.
@@ -726,7 +743,7 @@ class MemoryStorage:
             importance_weight: Weight for importance component (default 1.0).
             relevance_weight: Weight for relevance component (default 1.0).
             recency_decay_days: Days until recency score decays to ~0.37 (default 30).
-            
+
         Returns:
             List of ScoredMemory with component scores.
         """
@@ -745,7 +762,7 @@ class MemoryStorage:
             # Recency score: exponential decay from updated_at
             # score = exp(-days_old / decay_days)
             days_old = (now - memory.updated_at).total_seconds() / 86400
-            recency = 2.71828 ** (-days_old / recency_decay_days)
+            recency = math.exp(-days_old / recency_decay_days)
 
             # Importance score: normalize to 0-1 (importance is 1-10)
             importance = (memory.importance - 1) / 9.0
@@ -779,13 +796,13 @@ class MemoryStorage:
         filters: QueryFilters | None = None,
     ) -> dict:
         """Aggregate memories by a dimension.
-        
+
         Useful for understanding memory distribution without loading all data.
-        
+
         Args:
             group_by: Dimension to group by.
             filters: Optional filters to apply before aggregating.
-            
+
         Returns:
             Dict with aggregation results.
         """

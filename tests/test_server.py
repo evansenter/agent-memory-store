@@ -26,6 +26,7 @@ def server_module(temp_db_path):
         import importlib
 
         import agent_memory_store.server as server_mod
+
         importlib.reload(server_mod)
         yield server_mod
 
@@ -39,8 +40,14 @@ class TestListTools:
 
         tool_names = {t.name for t in tools}
         expected = {
-            "memory_store", "memory_recall", "memory_forget", "memory_list",
-            "memory_query", "memory_explore", "memory_search_weighted", "memory_aggregate"
+            "memory_store",
+            "memory_recall",
+            "memory_forget",
+            "memory_list",
+            "memory_query",
+            "memory_explore",
+            "memory_search_weighted",
+            "memory_aggregate",
         }
         assert tool_names == expected
 
@@ -144,9 +151,7 @@ class TestMemoryRecallTool:
         )
 
         # Recall
-        result = await server_module.call_tool(
-            "memory_recall", {"key": "recall-test"}
-        )
+        result = await server_module.call_tool("memory_recall", {"key": "recall-test"})
 
         data = json.loads(result[0].text)
         assert data["success"] is True
@@ -154,9 +159,7 @@ class TestMemoryRecallTool:
 
     async def test_recall_by_key_not_found(self, server_module):
         """Test recalling non-existent key."""
-        result = await server_module.call_tool(
-            "memory_recall", {"key": "nonexistent"}
-        )
+        result = await server_module.call_tool("memory_recall", {"key": "nonexistent"})
 
         data = json.loads(result[0].text)
         assert data["success"] is False
@@ -171,14 +174,10 @@ class TestMemoryRecallTool:
         await server_module.call_tool(
             "memory_store", {"key": "doc2", "value": "Rust programming guide"}
         )
-        await server_module.call_tool(
-            "memory_store", {"key": "doc3", "value": "Cooking recipes"}
-        )
+        await server_module.call_tool("memory_store", {"key": "doc3", "value": "Cooking recipes"})
 
         # Search
-        result = await server_module.call_tool(
-            "memory_recall", {"query": "programming"}
-        )
+        result = await server_module.call_tool("memory_recall", {"query": "programming"})
 
         data = json.loads(result[0].text)
         assert data["success"] is True
@@ -210,9 +209,7 @@ class TestMemoryRecallTool:
                 "memory_store", {"key": f"item{i}", "value": "common term"}
             )
 
-        result = await server_module.call_tool(
-            "memory_recall", {"query": "common", "limit": 2}
-        )
+        result = await server_module.call_tool("memory_recall", {"query": "common", "limit": 2})
 
         data = json.loads(result[0].text)
         assert len(data["memories"]) == 2
@@ -238,13 +235,9 @@ class TestMemoryForgetTool:
 
     async def test_forget_existing(self, server_module):
         """Test deleting an existing memory."""
-        await server_module.call_tool(
-            "memory_store", {"key": "to-delete", "value": "bye"}
-        )
+        await server_module.call_tool("memory_store", {"key": "to-delete", "value": "bye"})
 
-        result = await server_module.call_tool(
-            "memory_forget", {"key": "to-delete"}
-        )
+        result = await server_module.call_tool("memory_forget", {"key": "to-delete"})
 
         data = json.loads(result[0].text)
         assert data["success"] is True
@@ -252,9 +245,7 @@ class TestMemoryForgetTool:
 
     async def test_forget_nonexistent(self, server_module):
         """Test deleting non-existent memory."""
-        result = await server_module.call_tool(
-            "memory_forget", {"key": "never-existed"}
-        )
+        result = await server_module.call_tool("memory_forget", {"key": "never-existed"})
 
         data = json.loads(result[0].text)
         assert data["success"] is False
@@ -262,9 +253,7 @@ class TestMemoryForgetTool:
 
     async def test_forget_then_recall(self, server_module):
         """Test that forgotten memory cannot be recalled."""
-        await server_module.call_tool(
-            "memory_store", {"key": "temp", "value": "data"}
-        )
+        await server_module.call_tool("memory_store", {"key": "temp", "value": "data"})
         await server_module.call_tool("memory_forget", {"key": "temp"})
 
         result = await server_module.call_tool("memory_recall", {"key": "temp"})
@@ -278,12 +267,8 @@ class TestMemoryListTool:
 
     async def test_list_all(self, server_module):
         """Test listing all memories."""
-        await server_module.call_tool(
-            "memory_store", {"key": "list1", "value": "a"}
-        )
-        await server_module.call_tool(
-            "memory_store", {"key": "list2", "value": "b"}
-        )
+        await server_module.call_tool("memory_store", {"key": "list1", "value": "a"})
+        await server_module.call_tool("memory_store", {"key": "list2", "value": "b"})
 
         result = await server_module.call_tool("memory_list", {})
 
@@ -302,9 +287,7 @@ class TestMemoryListTool:
             {"key": "ns2", "value": "b", "namespace": "global"},
         )
 
-        result = await server_module.call_tool(
-            "memory_list", {"namespace": "project:test"}
-        )
+        result = await server_module.call_tool("memory_list", {"namespace": "project:test"})
 
         data = json.loads(result[0].text)
         assert data["count"] == 1
@@ -321,22 +304,16 @@ class TestMemoryListTool:
             {"key": "tag2", "value": "b", "tags": ["normal"]},
         )
 
-        result = await server_module.call_tool(
-            "memory_list", {"tags": ["urgent"]}
-        )
+        result = await server_module.call_tool("memory_list", {"tags": ["urgent"]})
 
         data = json.loads(result[0].text)
         assert data["count"] == 1
 
     async def test_list_with_since_days(self, server_module):
         """Test listing with since_days filter."""
-        await server_module.call_tool(
-            "memory_store", {"key": "recent", "value": "new"}
-        )
+        await server_module.call_tool("memory_store", {"key": "recent", "value": "new"})
 
-        result = await server_module.call_tool(
-            "memory_list", {"since_days": 1}
-        )
+        result = await server_module.call_tool("memory_list", {"since_days": 1})
 
         data = json.loads(result[0].text)
         assert data["count"] >= 1
@@ -344,9 +321,7 @@ class TestMemoryListTool:
     async def test_list_with_limit(self, server_module):
         """Test listing respects limit."""
         for i in range(10):
-            await server_module.call_tool(
-                "memory_store", {"key": f"bulk{i}", "value": str(i)}
-            )
+            await server_module.call_tool("memory_store", {"key": f"bulk{i}", "value": str(i)})
 
         result = await server_module.call_tool("memory_list", {"limit": 3})
 
@@ -356,9 +331,7 @@ class TestMemoryListTool:
     async def test_list_truncates_long_values(self, server_module):
         """Test that long values are truncated in list output."""
         long_value = "x" * 200
-        await server_module.call_tool(
-            "memory_store", {"key": "long", "value": long_value}
-        )
+        await server_module.call_tool("memory_store", {"key": "long", "value": long_value})
 
         result = await server_module.call_tool("memory_list", {})
 
@@ -408,9 +381,7 @@ class TestIntegrationScenarios:
         assert json.loads(store_result[0].text)["success"]
 
         # Recall
-        recall_result = await server_module.call_tool(
-            "memory_recall", {"key": "lifecycle"}
-        )
+        recall_result = await server_module.call_tool("memory_recall", {"key": "lifecycle"})
         assert json.loads(recall_result[0].text)["memory"]["value"] == "initial"
 
         # Update (store with same key)
@@ -421,21 +392,15 @@ class TestIntegrationScenarios:
         assert json.loads(update_result[0].text)["success"]
 
         # Verify update
-        verify_result = await server_module.call_tool(
-            "memory_recall", {"key": "lifecycle"}
-        )
+        verify_result = await server_module.call_tool("memory_recall", {"key": "lifecycle"})
         assert json.loads(verify_result[0].text)["memory"]["value"] == "updated"
 
         # Forget
-        forget_result = await server_module.call_tool(
-            "memory_forget", {"key": "lifecycle"}
-        )
+        forget_result = await server_module.call_tool("memory_forget", {"key": "lifecycle"})
         assert json.loads(forget_result[0].text)["success"]
 
         # Verify deletion
-        final_result = await server_module.call_tool(
-            "memory_recall", {"key": "lifecycle"}
-        )
+        final_result = await server_module.call_tool("memory_recall", {"key": "lifecycle"})
         assert not json.loads(final_result[0].text)["success"]
 
     async def test_multi_namespace_isolation(self, server_module):
@@ -455,12 +420,8 @@ class TestIntegrationScenarios:
         )
 
         # List by namespace
-        global_result = await server_module.call_tool(
-            "memory_list", {"namespace": "global"}
-        )
-        project_a_result = await server_module.call_tool(
-            "memory_list", {"namespace": "project:a"}
-        )
+        global_result = await server_module.call_tool("memory_list", {"namespace": "global"})
+        project_a_result = await server_module.call_tool("memory_list", {"namespace": "project:a"})
 
         global_data = json.loads(global_result[0].text)
         project_data = json.loads(project_a_result[0].text)

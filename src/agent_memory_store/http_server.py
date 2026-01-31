@@ -2,7 +2,6 @@
 
 import json
 import os
-from pathlib import Path
 
 from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
@@ -11,15 +10,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from .server import server
-from .storage import MemoryStorage
-
-# Initialize storage
-DB_PATH = os.environ.get(
-    "MEMORY_STORE_DB",
-    Path.home() / ".claude" / "contrib" / "agent-memory-store" / "memories.db",
-)
-Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+from .server import server, storage
 
 
 class TailscaleAuthMiddleware:
@@ -60,19 +51,15 @@ sse = SseServerTransport("/mcp/")
 
 async def handle_sse(request: Request) -> Response:
     """Handle SSE connections for MCP."""
-    async with sse.connect_sse(
-        request.scope, request.receive, request._send
-    ) as streams:
-        await server.run(
-            streams[0], streams[1], server.create_initialization_options()
-        )
+    async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
+        await server.run(streams[0], streams[1], server.create_initialization_options())
     return Response()
 
 
 async def handle_mcp_post(request: Request) -> Response:
     """Handle POST requests for MCP (stateless HTTP transport)."""
     body = await request.body()
-    
+
     # Parse JSON-RPC request
     try:
         rpc_request = json.loads(body)
@@ -81,22 +68,31 @@ async def handle_mcp_post(request: Request) -> Response:
 
     # Handle via server
     # For now, return method not supported - full implementation would route to server
-    return JSONResponse({
-        "jsonrpc": "2.0",
-        "id": rpc_request.get("id"),
-        "error": {"code": -32601, "message": "Use SSE transport at /mcp/"},
-    })
+    return JSONResponse(
+        {
+            "jsonrpc": "2.0",
+            "id": rpc_request.get("id"),
+            "error": {"code": -32601, "message": "Use SSE transport at /mcp/"},
+        }
+    )
 
 
 async def health(request: Request) -> JSONResponse:
     """Health check endpoint."""
-    storage = MemoryStorage(DB_PATH)
     count = len(storage.list_memories(limit=1000))
-    return JSONResponse({
-        "status": "healthy",
-        "service": "agent-memory-store",
-        "memories_count": count,
-    })
+    return JSONResponse(
+        {
+            "status": "healthy",
+            "service": "agent-memory-store",
+            "memories_count": count,
+        }
+    )
+
+
+def _is_auth_disabled() -> bool:
+    """Check if auth is explicitly disabled (only truthy values like 1, true, yes)."""
+    val = os.environ.get("AUTH_DISABLED", "").lower()
+    return val in ("1", "true", "yes")
 
 
 # Build app
@@ -108,5 +104,5 @@ routes = [
 
 app = Starlette(
     routes=routes,
-    middleware=[Middleware(TailscaleAuthMiddleware)] if not os.environ.get("AUTH_DISABLED") else [],
+    middleware=[] if _is_auth_disabled() else [Middleware(TailscaleAuthMiddleware)],
 )
