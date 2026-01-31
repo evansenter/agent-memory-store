@@ -4,8 +4,6 @@ import json
 import sqlite3
 from datetime import datetime, timedelta
 
-import pytest
-
 from agent_memory_store.storage import Memory, MemoryStorage
 
 
