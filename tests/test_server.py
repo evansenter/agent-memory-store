@@ -38,7 +38,11 @@ class TestListTools:
         tools = await server_module.list_tools()
 
         tool_names = {t.name for t in tools}
-        assert tool_names == {"memory_store", "memory_recall", "memory_forget", "memory_list"}
+        expected = {
+            "memory_store", "memory_recall", "memory_forget", "memory_list",
+            "memory_query", "memory_explore", "memory_search_weighted", "memory_aggregate"
+        }
+        assert tool_names == expected
 
     async def test_memory_store_tool_schema(self, server_module):
         """Test memory_store tool has correct schema."""
