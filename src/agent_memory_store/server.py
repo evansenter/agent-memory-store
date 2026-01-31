@@ -19,6 +19,34 @@ storage = MemoryStorage(DB_PATH)
 # Create server
 server = Server("agent-memory-store")
 
+# Guide resource
+GUIDE_URI = "agent-memory-store://guide"
+
+
+@server.list_resources()
+async def list_resources() -> list[types.Resource]:
+    """List available resources."""
+    return [
+        types.Resource(
+            uri=GUIDE_URI,
+            name="Usage Guide",
+            description="Usage guide and API reference for agent-memory-store",
+            mimeType="text/markdown",
+        )
+    ]
+
+
+@server.read_resource()
+async def read_resource(uri: str) -> str:
+    """Read a resource by URI."""
+    if str(uri) == GUIDE_URI:
+        guide_path = Path(__file__).parent / "guide.md"
+        try:
+            return guide_path.read_text()
+        except FileNotFoundError:
+            return "# Agent Memory Store\n\nGuide file not found."
+    raise ValueError(f"Unknown resource: {uri}")
+
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
