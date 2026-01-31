@@ -41,6 +41,7 @@ class Memory:
     expires_at: datetime | None = None
     access_count: int = 0
     last_accessed_at: datetime | None = None
+    importance: int = 5  # 1-10 scale, default 5 (medium)
 
 
 class MemoryStorage:
@@ -80,12 +81,22 @@ class MemoryStorage:
                     created_by TEXT,
                     expires_at TEXT,
                     access_count INTEGER DEFAULT 0,
-                    last_accessed_at TEXT
+                    last_accessed_at TEXT,
+                    importance INTEGER DEFAULT 5
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace);
                 CREATE INDEX IF NOT EXISTS idx_memories_expires ON memories(expires_at);
             """)
+            
+            # Migration: Add importance column if it doesn't exist
+            cursor = conn.execute("PRAGMA table_info(memories)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if "importance" not in columns:
+                conn.execute("ALTER TABLE memories ADD COLUMN importance INTEGER DEFAULT 5")
+            
+            # Create importance index (after migration ensures column exists)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance)")
 
             # Create FTS5 virtual table if not exists
             cursor = conn.execute(
@@ -154,12 +165,18 @@ class MemoryStorage:
         tags: list[str] | None = None,
         created_by: str | None = None,
         ttl_days: int | None = None,
+        importance: int = 5,
     ) -> Memory:
-        """Store a memory, replacing if key exists."""
+        """Store a memory, replacing if key exists.
+        
+        Args:
+            importance: 1-10 scale (1=trivial, 5=normal, 10=critical)
+        """
         memory_id = str(uuid.uuid4())
         now = datetime.now(UTC).isoformat()
         tags_json = json.dumps(tags or [])
         expires_at = None
+        importance = max(1, min(10, importance))  # Clamp to 1-10
         if ttl_days:
 
             expires_at = (datetime.now(UTC) + timedelta(days=ttl_days)).isoformat()
@@ -179,16 +196,17 @@ class MemoryStorage:
 
             conn.execute(
                 """
-                INSERT INTO memories (id, key, value, namespace, tags, created_at, updated_at, created_by, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO memories (id, key, value, namespace, tags, created_at, updated_at, created_by, expires_at, importance)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET
                     value = excluded.value,
                     namespace = excluded.namespace,
                     tags = excluded.tags,
                     updated_at = excluded.updated_at,
-                    expires_at = excluded.expires_at
+                    expires_at = excluded.expires_at,
+                    importance = excluded.importance
                 """,
-                (memory_id, key, value, namespace, tags_json, now, now, created_by, expires_at),
+                (memory_id, key, value, namespace, tags_json, now, now, created_by, expires_at, importance),
             )
 
             # Store embedding if available
@@ -216,6 +234,7 @@ class MemoryStorage:
             updated_at=datetime.fromisoformat(now),
             created_by=created_by,
             expires_at=datetime.fromisoformat(expires_at) if expires_at else None,
+            importance=importance,
         )
 
     def recall_by_key(self, key: str) -> Memory | None:
@@ -452,4 +471,5 @@ class MemoryStorage:
                 if row["last_accessed_at"]
                 else None
             ),
+            importance=row["importance"] if "importance" in row.keys() else 5,
         )

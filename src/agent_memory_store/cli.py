@@ -32,13 +32,15 @@ def format_memory(memory, verbose: bool = False) -> str:
                 "created_by": memory.created_by,
                 "expires_at": memory.expires_at.isoformat() if memory.expires_at else None,
                 "access_count": memory.access_count,
+                "importance": memory.importance,
             },
             indent=2,
         )
     else:
         tags_str = f" [{', '.join(memory.tags)}]" if memory.tags else ""
         ns_str = f" ({memory.namespace})" if memory.namespace != "global" else ""
-        return f"{memory.key}{ns_str}{tags_str}: {memory.value}"
+        imp_str = f" [!{memory.importance}]" if memory.importance != 5 else ""
+        return f"{memory.key}{ns_str}{tags_str}{imp_str}: {memory.value}"
 
 
 def cmd_store(args, storage: MemoryStorage) -> int:
@@ -51,6 +53,7 @@ def cmd_store(args, storage: MemoryStorage) -> int:
         tags=tags,
         created_by=args.created_by,
         ttl_days=args.ttl,
+        importance=args.importance,
     )
     if args.verbose:
         print(format_memory(memory, verbose=True))
@@ -136,6 +139,7 @@ def cmd_list(args, storage: MemoryStorage) -> int:
                 "value": m.value,
                 "namespace": m.namespace,
                 "tags": m.tags,
+                "importance": m.importance,
                 "updated_at": m.updated_at.isoformat(),
             }
             for m in memories
@@ -176,6 +180,10 @@ def main(argv: list[str] | None = None) -> int:
     store_parser.add_argument("-t", "--tags", help="Comma-separated tags")
     store_parser.add_argument("--created-by", help="Creator identifier")
     store_parser.add_argument("--ttl", type=int, help="Time-to-live in days")
+    store_parser.add_argument(
+        "-i", "--importance", type=int, default=5,
+        help="Importance (1-10, default 5)"
+    )
 
     # recall command
     recall_parser = subparsers.add_parser("recall", help="Recall a memory")
