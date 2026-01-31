@@ -11,10 +11,10 @@ from .storage import MemoryStorage
 
 
 def get_default_db_path() -> Path:
-    """Get the default database path."""
-    xdg_data = Path.home() / ".local" / "share" / "agent-memory-store"
-    xdg_data.mkdir(parents=True, exist_ok=True)
-    return xdg_data / "memories.db"
+    """Get the default database path (consistent with MCP server)."""
+    db_dir = Path.home() / ".claude" / "contrib" / "agent-memory-store"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    return db_dir / "memories.db"
 
 
 def format_memory(memory, verbose: bool = False) -> str:
@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         "--db",
         type=Path,
         default=None,
-        help="Path to database file (default: ~/.local/share/agent-memory-store/memories.db)",
+        help="Path to database file (default: ~/.claude/contrib/agent-memory-store/memories.db)",
     )
     parser.add_argument(
         "-v", "--verbose",
