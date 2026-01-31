@@ -1,0 +1,39 @@
+[project]
+name = "agent-memory-store"
+version = "0.1.0"
+description = "MCP server for shared persistent memory across Claude Code sessions"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Evan Senter" }]
+dependencies = [
+    "mcp>=1.0.0",
+    "uvicorn>=0.30.0",
+    "httpx>=0.27.0",
+    "sqlite-vec>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]
+embeddings = [
+    "sentence-transformers>=2.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
