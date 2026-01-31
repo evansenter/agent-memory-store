@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 """Unit tests for storage.py - CRUD, FTS5, and TTL functionality."""
 
 import json
@@ -12,7 +13,7 @@ class TestMemoryDataclass:
 
     def test_memory_creation(self):
         """Test creating a Memory instance."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         memory = Memory(
             id="test-id",
             key="test-key",
@@ -34,7 +35,7 @@ class TestMemoryDataclass:
 
     def test_memory_with_optional_fields(self):
         """Test Memory with all optional fields."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         expires = now + timedelta(days=7)
         memory = Memory(
             id="test-id",
@@ -283,7 +284,7 @@ class TestTTL:
         memory = storage.store(key="ephemeral", value="temporary", ttl_days=7)
 
         assert memory.expires_at is not None
-        expected_expiry = datetime.utcnow() + timedelta(days=7)
+        expected_expiry = datetime.now(UTC) + timedelta(days=7)
         # Allow 1 second tolerance
         assert abs((memory.expires_at - expected_expiry).total_seconds()) < 1
 
@@ -305,7 +306,7 @@ class TestTTL:
 
         assert row["expires_at"] is not None
         expires = datetime.fromisoformat(row["expires_at"])
-        expected = datetime.utcnow() + timedelta(days=30)
+        expected = datetime.now(UTC) + timedelta(days=30)
         assert abs((expires - expected).total_seconds()) < 1
 
     def test_ttl_update_on_re_store(self, storage):
@@ -313,7 +314,7 @@ class TestTTL:
         storage.store(key="refresh", value="v1", ttl_days=7)
         updated = storage.store(key="refresh", value="v2", ttl_days=30)
 
-        expected = datetime.utcnow() + timedelta(days=30)
+        expected = datetime.now(UTC) + timedelta(days=30)
         assert abs((updated.expires_at - expected).total_seconds()) < 1
 
 
@@ -357,7 +358,7 @@ class TestListMemories:
 
         # Manually insert an old memory
         with sqlite3.connect(temp_db) as conn:
-            old_date = (datetime.utcnow() - timedelta(days=10)).isoformat()
+            old_date = (datetime.now(UTC) - timedelta(days=10)).isoformat()
             conn.execute(
                 """
                 INSERT INTO memories (id, key, value, namespace, tags, created_at, updated_at)
@@ -367,7 +368,7 @@ class TestListMemories:
             )
 
         # Filter to last 5 days
-        since = datetime.utcnow() - timedelta(days=5)
+        since = datetime.now(UTC) - timedelta(days=5)
         memories = storage.list_memories(since=since)
 
         assert len(memories) == 1

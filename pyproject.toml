@@ -12,6 +12,7 @@ dependencies = [
     "httpx>=0.27.0",
     "sqlite-vec>=0.1.0",
     "starlette>=0.52.1",
+    "pytest-cov[dev]>=7.0.0",
 ]
 
 [project.scripts]

@@ -2,7 +2,7 @@
 
 import json
 import os
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import mcp.server.stdio
@@ -311,9 +311,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     elif name == "memory_list":
         since = None
         if "since_days" in arguments:
-            from datetime import timedelta
 
-            since = datetime.utcnow() - timedelta(days=arguments["since_days"])
+            since = datetime.now(UTC) - timedelta(days=arguments["since_days"])
 
         memories = storage.list_memories(
             namespace=arguments.get("namespace"),

@@ -6,7 +6,7 @@ import sqlite3
 import struct
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # No longer needed - using X | None syntax
@@ -157,13 +157,12 @@ class MemoryStorage:
     ) -> Memory:
         """Store a memory, replacing if key exists."""
         memory_id = str(uuid.uuid4())
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
         tags_json = json.dumps(tags or [])
         expires_at = None
         if ttl_days:
-            from datetime import timedelta
 
-            expires_at = (datetime.utcnow() + timedelta(days=ttl_days)).isoformat()
+            expires_at = (datetime.now(UTC) + timedelta(days=ttl_days)).isoformat()
 
         # Generate embedding if available
         embedding = None
@@ -238,10 +237,21 @@ class MemoryStorage:
                 SET access_count = access_count + 1, last_accessed_at = ?
                 WHERE key = ?
                 """,
-                (datetime.utcnow().isoformat(), key),
+                (datetime.now(UTC).isoformat(), key),
             )
 
             return self._row_to_memory(row)
+
+    def _escape_fts5_query(self, query: str) -> str:
+        """Escape a query string for FTS5 MATCH.
+        
+        FTS5 interprets hyphens, colons, etc. as operators. We escape by
+        double-quoting each word to treat them as literals.
+        """
+        # Split on whitespace and quote each term
+        terms = query.split()
+        escaped = " ".join(f'"{term}"' for term in terms)
+        return escaped
 
     def search(
         self,
@@ -254,13 +264,16 @@ class MemoryStorage:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
 
+            # Escape the query for FTS5
+            escaped_query = self._escape_fts5_query(query)
+
             # Build query with optional filters
             sql = """
                 SELECT m.* FROM memories m
                 JOIN memories_fts fts ON m.rowid = fts.rowid
                 WHERE memories_fts MATCH ?
             """
-            params: list = [query]
+            params: list = [escaped_query]
 
             if namespace:
                 sql += " AND m.namespace = ?"
