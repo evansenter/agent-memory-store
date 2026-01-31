@@ -2,14 +2,15 @@
 
 import json
 import logging
+import re
 import sqlite3
 import struct
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
-# No longer needed - using X | None syntax
 from . import embeddings
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,70 @@ class Memory:
     access_count: int = 0
     last_accessed_at: datetime | None = None
     importance: int = 5  # 1-10 scale, default 5 (medium)
+
+
+@dataclass
+class QueryFilters:
+    """Structured query filters for symbolic memory access."""
+
+    # Text filters
+    key_pattern: str | None = None  # Regex pattern for key
+    value_pattern: str | None = None  # Regex pattern for value
+    text_contains: str | None = None  # Substring match in key or value
+
+    # Date filters
+    created_after: datetime | None = None
+    created_before: datetime | None = None
+    updated_after: datetime | None = None
+    updated_before: datetime | None = None
+
+    # Importance filter
+    min_importance: int | None = None
+    max_importance: int | None = None
+
+    # Standard filters
+    namespace: str | None = None
+    tags: list[str] | None = None
+    has_any_tag: list[str] | None = None  # Match any of these tags
+    has_all_tags: list[str] | None = None  # Match all of these tags
+
+    # Access patterns
+    min_access_count: int | None = None
+    accessed_after: datetime | None = None
+    never_accessed: bool = False
+
+    # Pagination
+    limit: int = 50
+    offset: int = 0
+
+    # Sorting
+    order_by: Literal["created_at", "updated_at", "importance", "access_count", "key"] = "updated_at"
+    order_desc: bool = True
+
+
+@dataclass
+class MemoryStats:
+    """Statistics about the memory store."""
+
+    total_count: int
+    namespaces: dict[str, int]  # namespace -> count
+    tags: dict[str, int]  # tag -> count
+    importance_distribution: dict[int, int]  # importance level -> count
+    date_range: tuple[datetime | None, datetime | None]  # (oldest, newest)
+    avg_importance: float
+    total_access_count: int
+    semantic_available: bool
+
+
+@dataclass
+class ScoredMemory:
+    """A memory with a composite retrieval score."""
+
+    memory: Memory
+    score: float
+    recency_score: float = 0.0
+    importance_score: float = 0.0
+    relevance_score: float = 0.0
 
 
 class MemoryStorage:
@@ -473,3 +538,294 @@ class MemoryStorage:
             ),
             importance=row["importance"] if "importance" in row.keys() else 5,
         )
+
+    # =========================================================================
+    # Symbolic Query Layer (RLM-inspired)
+    # =========================================================================
+
+    def query(self, filters: QueryFilters) -> list[Memory]:
+        """Execute a structured query with symbolic filters.
+        
+        This enables code-based filtering before semantic search,
+        allowing agents to programmatically explore memories.
+        
+        Args:
+            filters: QueryFilters specifying constraints.
+            
+        Returns:
+            List of matching memories.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+
+            sql = "SELECT * FROM memories WHERE 1=1"
+            params: list = []
+
+            # Namespace filter
+            if filters.namespace:
+                sql += " AND namespace = ?"
+                params.append(filters.namespace)
+
+            # Date filters
+            if filters.created_after:
+                sql += " AND created_at >= ?"
+                params.append(filters.created_after.isoformat())
+            if filters.created_before:
+                sql += " AND created_at <= ?"
+                params.append(filters.created_before.isoformat())
+            if filters.updated_after:
+                sql += " AND updated_at >= ?"
+                params.append(filters.updated_after.isoformat())
+            if filters.updated_before:
+                sql += " AND updated_at <= ?"
+                params.append(filters.updated_before.isoformat())
+
+            # Importance filters
+            if filters.min_importance is not None:
+                sql += " AND importance >= ?"
+                params.append(filters.min_importance)
+            if filters.max_importance is not None:
+                sql += " AND importance <= ?"
+                params.append(filters.max_importance)
+
+            # Access pattern filters
+            if filters.min_access_count is not None:
+                sql += " AND access_count >= ?"
+                params.append(filters.min_access_count)
+            if filters.accessed_after:
+                sql += " AND last_accessed_at >= ?"
+                params.append(filters.accessed_after.isoformat())
+            if filters.never_accessed:
+                sql += " AND last_accessed_at IS NULL"
+
+            # Text contains (substring match in SQL)
+            if filters.text_contains:
+                sql += " AND (key LIKE ? OR value LIKE ?)"
+                pattern = f"%{filters.text_contains}%"
+                params.extend([pattern, pattern])
+
+            # Sorting
+            order_col = filters.order_by
+            order_dir = "DESC" if filters.order_desc else "ASC"
+            sql += f" ORDER BY {order_col} {order_dir}"
+
+            # Pagination
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([filters.limit, filters.offset])
+
+            cursor = conn.execute(sql, params)
+            rows = cursor.fetchall()
+
+            memories = [self._row_to_memory(row) for row in rows]
+
+            # Apply regex filters in Python (SQLite regex is limited)
+            if filters.key_pattern:
+                pattern = re.compile(filters.key_pattern, re.IGNORECASE)
+                memories = [m for m in memories if pattern.search(m.key)]
+            if filters.value_pattern:
+                pattern = re.compile(filters.value_pattern, re.IGNORECASE)
+                memories = [m for m in memories if pattern.search(m.value)]
+
+            # Apply tag filters in Python
+            if filters.tags:  # Legacy: any of these tags
+                memories = [m for m in memories if any(t in m.tags for t in filters.tags)]
+            if filters.has_any_tag:
+                memories = [m for m in memories if any(t in m.tags for t in filters.has_any_tag)]
+            if filters.has_all_tags:
+                memories = [m for m in memories if all(t in m.tags for t in filters.has_all_tags)]
+
+            return memories
+
+    def explore(self) -> MemoryStats:
+        """Get statistics about the memory store.
+        
+        Useful for agents to understand what's available before querying.
+        
+        Returns:
+            MemoryStats with counts, distributions, and metadata.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+
+            # Total count
+            total = conn.execute("SELECT COUNT(*) as cnt FROM memories").fetchone()["cnt"]
+
+            # Namespace distribution
+            namespaces = {}
+            for row in conn.execute(
+                "SELECT namespace, COUNT(*) as cnt FROM memories GROUP BY namespace"
+            ):
+                namespaces[row["namespace"]] = row["cnt"]
+
+            # Tag distribution (requires parsing JSON)
+            tags: dict[str, int] = {}
+            for row in conn.execute("SELECT tags FROM memories"):
+                for tag in json.loads(row["tags"]):
+                    tags[tag] = tags.get(tag, 0) + 1
+
+            # Importance distribution
+            importance_dist = {}
+            for row in conn.execute(
+                "SELECT importance, COUNT(*) as cnt FROM memories GROUP BY importance"
+            ):
+                importance_dist[row["importance"]] = row["cnt"]
+
+            # Date range
+            date_row = conn.execute(
+                "SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM memories"
+            ).fetchone()
+            oldest = datetime.fromisoformat(date_row["oldest"]) if date_row["oldest"] else None
+            newest = datetime.fromisoformat(date_row["newest"]) if date_row["newest"] else None
+
+            # Average importance
+            avg_row = conn.execute("SELECT AVG(importance) as avg_imp FROM memories").fetchone()
+            avg_importance = avg_row["avg_imp"] or 0.0
+
+            # Total access count
+            access_row = conn.execute(
+                "SELECT SUM(access_count) as total FROM memories"
+            ).fetchone()
+            total_access = access_row["total"] or 0
+
+            return MemoryStats(
+                total_count=total,
+                namespaces=namespaces,
+                tags=dict(sorted(tags.items(), key=lambda x: -x[1])[:50]),  # Top 50 tags
+                importance_distribution=importance_dist,
+                date_range=(oldest, newest),
+                avg_importance=round(avg_importance, 2),
+                total_access_count=total_access,
+                semantic_available=self.semantic_available,
+            )
+
+    def search_weighted(
+        self,
+        query: str,
+        namespace: str | None = None,
+        tags: list[str] | None = None,
+        limit: int = 10,
+        recency_weight: float = 1.0,
+        importance_weight: float = 1.0,
+        relevance_weight: float = 1.0,
+        recency_decay_days: float = 30.0,
+    ) -> list[ScoredMemory]:
+        """Search with combined recency × importance × relevance scoring.
+        
+        Implements the Generative Agents retrieval model where memories
+        are scored by a weighted combination of:
+        - Recency: How recently the memory was created/updated
+        - Importance: The stored importance value (1-10)
+        - Relevance: Semantic similarity to the query
+        
+        Args:
+            query: Search query for relevance scoring.
+            namespace: Optional namespace filter.
+            tags: Optional tag filter.
+            limit: Maximum results to return.
+            recency_weight: Weight for recency component (default 1.0).
+            importance_weight: Weight for importance component (default 1.0).
+            relevance_weight: Weight for relevance component (default 1.0).
+            recency_decay_days: Days until recency score decays to ~0.37 (default 30).
+            
+        Returns:
+            List of ScoredMemory with component scores.
+        """
+        # Get semantic search results with relevance scores
+        if self.semantic_available:
+            results = self.search_semantic(query, namespace, tags, limit=limit * 3)
+        else:
+            # Fall back to FTS with uniform relevance
+            memories = self.search(query, namespace, tags, limit=limit * 3)
+            results = [(m, 1.0) for m in memories]
+
+        now = datetime.now(UTC)
+        scored: list[ScoredMemory] = []
+
+        for memory, relevance in results:
+            # Recency score: exponential decay from updated_at
+            # score = exp(-days_old / decay_days)
+            days_old = (now - memory.updated_at).total_seconds() / 86400
+            recency = 2.71828 ** (-days_old / recency_decay_days)
+
+            # Importance score: normalize to 0-1 (importance is 1-10)
+            importance = (memory.importance - 1) / 9.0
+
+            # Relevance is already 0-1 from semantic search
+
+            # Combined score
+            total = (
+                recency_weight * recency
+                + importance_weight * importance
+                + relevance_weight * relevance
+            )
+
+            scored.append(
+                ScoredMemory(
+                    memory=memory,
+                    score=total,
+                    recency_score=recency,
+                    importance_score=importance,
+                    relevance_score=relevance,
+                )
+            )
+
+        # Sort by combined score, return top N
+        scored.sort(key=lambda x: x.score, reverse=True)
+        return scored[:limit]
+
+    def aggregate(
+        self,
+        group_by: Literal["namespace", "tag", "importance", "date"] = "namespace",
+        filters: QueryFilters | None = None,
+    ) -> dict:
+        """Aggregate memories by a dimension.
+        
+        Useful for understanding memory distribution without loading all data.
+        
+        Args:
+            group_by: Dimension to group by.
+            filters: Optional filters to apply before aggregating.
+            
+        Returns:
+            Dict with aggregation results.
+        """
+        # First apply filters to get the subset
+        if filters:
+            memories = self.query(filters)
+        else:
+            # Get all memories
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("SELECT * FROM memories")
+                memories = [self._row_to_memory(row) for row in cursor.fetchall()]
+
+        result: dict = {"group_by": group_by, "groups": {}, "total": len(memories)}
+
+        if group_by == "namespace":
+            groups: dict[str, int] = {}
+            for m in memories:
+                groups[m.namespace] = groups.get(m.namespace, 0) + 1
+            result["groups"] = groups
+
+        elif group_by == "tag":
+            groups = {}
+            for m in memories:
+                for tag in m.tags:
+                    groups[tag] = groups.get(tag, 0) + 1
+            result["groups"] = dict(sorted(groups.items(), key=lambda x: -x[1]))
+
+        elif group_by == "importance":
+            groups = {}
+            for m in memories:
+                groups[m.importance] = groups.get(m.importance, 0) + 1
+            result["groups"] = groups
+
+        elif group_by == "date":
+            # Group by date (YYYY-MM-DD)
+            groups = {}
+            for m in memories:
+                date_key = m.created_at.strftime("%Y-%m-%d")
+                groups[date_key] = groups.get(date_key, 0) + 1
+            result["groups"] = dict(sorted(groups.items()))
+
+        return result
