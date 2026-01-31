@@ -1,13 +1,12 @@
 [Unit]
-Description=Agent Memory Store - MCP server for shared persistent memory
+Description=Agent Memory Store - Persistent memory MCP server
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=__PROJECT_DIR__
 Environment=PYTHONPATH=__PROJECT_DIR__/src
-Environment=MEMORY_STORE_DB=__HOME__/.claude/contrib/agent-memory-store/memories.db
-ExecStart=__VENV_PYTHON__ -m uvicorn agent_memory_store.http_server:app --host 127.0.0.1 --port 8082
+ExecStart=__VENV_PYTHON__ -m uvicorn agent_memory_store.http_server:app --host 127.0.0.1 --port 8083
 Restart=always
 RestartSec=5
 StandardOutput=append:__HOME__/.claude/contrib/agent-memory-store/agent-memory-store.log

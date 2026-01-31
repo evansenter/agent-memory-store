@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install agent-memory-store as a Linux systemd user service
+# Install the agent memory store as a Linux systemd user service (auto-starts on login)
 
 set -e
 
@@ -18,7 +18,7 @@ if [[ ! -f "$VENV_PYTHON" ]]; then
     exit 1
 fi
 
-# Create directories
+# Create directories if needed
 mkdir -p "$SERVICE_DIR"
 mkdir -p "$HOME/.claude/contrib/agent-memory-store"
 
@@ -35,22 +35,24 @@ sed -e "s|__VENV_PYTHON__|$VENV_PYTHON|g" \
     -e "s|__HOME__|$HOME|g" \
     "$SERVICE_TEMPLATE" > "$SERVICE_DEST"
 
-# Reload and start
+# Reload systemd and start service
 systemctl --user daemon-reload
 echo "Starting service..."
 systemctl --user enable --now "$SERVICE_NAME"
 
-# Verify
-sleep 1
+# Verify it's running
+sleep 2
 if systemctl --user is-active "$SERVICE_NAME" &>/dev/null; then
     echo ""
     echo "Agent Memory Store installed and running!"
-    echo "  Port: 8082"
-    echo "  DB: ~/.claude/contrib/agent-memory-store/memories.db"
     echo "  Logs: ~/.claude/contrib/agent-memory-store/agent-memory-store.log"
+    echo "  Errors: ~/.claude/contrib/agent-memory-store/agent-memory-store.err"
     echo "  Status: systemctl --user status $SERVICE_NAME"
+    echo ""
+    echo "To uninstall: $SCRIPT_DIR/uninstall-systemd.sh"
 else
-    echo "Error: Service failed to start"
-    echo "  Check: journalctl --user -u $SERVICE_NAME"
+    echo "Error: Service failed to start. Check logs:"
+    echo "  journalctl --user -u $SERVICE_NAME"
+    echo "  ~/.claude/contrib/agent-memory-store/agent-memory-store.err"
     exit 1
 fi
