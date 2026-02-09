@@ -112,6 +112,10 @@ class ScoredMemory:
     relevance_score: float = 0.0
 
 
+# Use strftime with T separator to match Python's isoformat() for correct comparison
+_TTL_FILTER = "AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%f', 'now'))"
+
+
 class MemoryStorage:
     """SQLite-backed memory storage with FTS5 and optional semantic search."""
 
@@ -258,6 +262,24 @@ class MemoryStorage:
             embedding = embeddings.get_embedding(text_to_embed)
 
         with self._get_connection() as conn:
+            # Opportunistic cleanup: delete expired memories
+            expired_ids = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT id FROM memories"
+                    " WHERE expires_at IS NOT NULL"
+                    " AND expires_at <= strftime('%Y-%m-%dT%H:%M:%f', 'now')"
+                ).fetchall()
+            ]
+            if expired_ids:
+                placeholders = ",".join("?" * len(expired_ids))
+                conn.execute(f"DELETE FROM memories WHERE id IN ({placeholders})", expired_ids)
+                if self._vec_available:
+                    conn.execute(
+                        f"DELETE FROM memories_vec WHERE memory_id IN ({placeholders})",
+                        expired_ids,
+                    )
+
             # Check if key already exists to get the existing id
             cursor = conn.execute("SELECT id FROM memories WHERE key = ?", (key,))
             existing = cursor.fetchone()
@@ -325,19 +347,19 @@ class MemoryStorage:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                "SELECT * FROM memories WHERE key = ?",
+                f"SELECT * FROM memories WHERE key = ? {_TTL_FILTER}",
                 (key,),
             )
             row = cursor.fetchone()
             if not row:
                 return None
 
-            # Update access stats
+            # Update access stats (only for non-expired memories)
             conn.execute(
-                """
+                f"""
                 UPDATE memories
                 SET access_count = access_count + 1, last_accessed_at = ?
-                WHERE key = ?
+                WHERE key = ? {_TTL_FILTER}
                 """,
                 (datetime.now(UTC).isoformat(), key),
             )
@@ -370,10 +392,10 @@ class MemoryStorage:
             escaped_query = self._escape_fts5_query(query)
 
             # Build query with optional filters
-            sql = """
+            sql = f"""
                 SELECT m.* FROM memories m
                 JOIN memories_fts fts ON m.rowid = fts.rowid
-                WHERE memories_fts MATCH ?
+                WHERE memories_fts MATCH ? {_TTL_FILTER}
             """
             params: list = [escaped_query]
 
@@ -461,6 +483,10 @@ class MemoryStorage:
             for row in rows:
                 memory = self._row_to_memory(row)
 
+                # Filter expired memories
+                if memory.expires_at is not None and memory.expires_at <= datetime.now(UTC):
+                    continue
+
                 # Apply namespace filter
                 if namespace and memory.namespace != namespace:
                     continue
@@ -512,7 +538,7 @@ class MemoryStorage:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
 
-            sql = "SELECT * FROM memories WHERE 1=1"
+            sql = f"SELECT * FROM memories WHERE 1=1 {_TTL_FILTER}"
             params: list = []
 
             if namespace:
@@ -574,7 +600,7 @@ class MemoryStorage:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
 
-            sql = "SELECT * FROM memories WHERE 1=1"
+            sql = f"SELECT * FROM memories WHERE 1=1 {_TTL_FILTER}"
             params: list = []
 
             # Namespace filter
@@ -666,42 +692,48 @@ class MemoryStorage:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
 
+            _live = f"WHERE 1=1 {_TTL_FILTER}"
+
             # Total count
-            total = conn.execute("SELECT COUNT(*) as cnt FROM memories").fetchone()["cnt"]
+            total = conn.execute(f"SELECT COUNT(*) as cnt FROM memories {_live}").fetchone()["cnt"]
 
             # Namespace distribution
             namespaces = {}
             for row in conn.execute(
-                "SELECT namespace, COUNT(*) as cnt FROM memories GROUP BY namespace"
+                f"SELECT namespace, COUNT(*) as cnt FROM memories {_live} GROUP BY namespace"
             ):
                 namespaces[row["namespace"]] = row["cnt"]
 
             # Tag distribution (requires parsing JSON)
             tags: dict[str, int] = {}
-            for row in conn.execute("SELECT tags FROM memories"):
+            for row in conn.execute(f"SELECT tags FROM memories {_live}"):
                 for tag in json.loads(row["tags"]):
                     tags[tag] = tags.get(tag, 0) + 1
 
             # Importance distribution
             importance_dist = {}
             for row in conn.execute(
-                "SELECT importance, COUNT(*) as cnt FROM memories GROUP BY importance"
+                f"SELECT importance, COUNT(*) as cnt FROM memories {_live} GROUP BY importance"
             ):
                 importance_dist[row["importance"]] = row["cnt"]
 
             # Date range
             date_row = conn.execute(
-                "SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM memories"
+                f"SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM memories {_live}"
             ).fetchone()
             oldest = datetime.fromisoformat(date_row["oldest"]) if date_row["oldest"] else None
             newest = datetime.fromisoformat(date_row["newest"]) if date_row["newest"] else None
 
             # Average importance
-            avg_row = conn.execute("SELECT AVG(importance) as avg_imp FROM memories").fetchone()
+            avg_row = conn.execute(
+                f"SELECT AVG(importance) as avg_imp FROM memories {_live}"
+            ).fetchone()
             avg_importance = avg_row["avg_imp"] or 0.0
 
             # Total access count
-            access_row = conn.execute("SELECT SUM(access_count) as total FROM memories").fetchone()
+            access_row = conn.execute(
+                f"SELECT SUM(access_count) as total FROM memories {_live}"
+            ).fetchone()
             total_access = access_row["total"] or 0
 
             return MemoryStats(
@@ -806,14 +838,14 @@ class MemoryStorage:
         Returns:
             Dict with aggregation results.
         """
-        # First apply filters to get the subset
+        # First apply filters to get the subset (query() already filters expired)
         if filters:
             memories = self.query(filters)
         else:
-            # Get all memories
+            # Get all live memories
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                cursor = conn.execute("SELECT * FROM memories")
+                cursor = conn.execute(f"SELECT * FROM memories WHERE 1=1 {_TTL_FILTER}")
                 memories = [self._row_to_memory(row) for row in cursor.fetchall()]
 
         result: dict = {"group_by": group_by, "groups": {}, "total": len(memories)}
