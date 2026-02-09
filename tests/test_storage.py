@@ -1,10 +1,10 @@
-"""Unit tests for storage.py - CRUD, FTS5, and TTL functionality."""
+"""Unit tests for storage.py - CRUD, FTS5, TTL functionality, and TTL enforcement."""
 
 import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from agent_memory_store.storage import Memory, MemoryStorage
+from agent_memory_store.storage import Memory, MemoryStorage, QueryFilters
 
 
 class TestMemoryDataclass:
@@ -464,3 +464,130 @@ class TestEdgeCases:
         recalled = storage.recall_by_key("json-data")
         parsed = json.loads(recalled.value)
         assert parsed == data
+
+
+class TestTTLEnforcement:
+    """Tests that expired memories are excluded from all read paths."""
+
+    def test_expired_excluded_from_recall_by_key(self, storage, expire_memory):
+        """Expired memory should not be returned by recall_by_key."""
+        storage.store(key="temp", value="data", ttl_days=7)
+        expire_memory("temp")
+
+        assert storage.recall_by_key("temp") is None
+
+    def test_expired_excluded_from_search(self, storage, expire_memory):
+        """Expired memory should not appear in FTS search results."""
+        storage.store(key="searchable", value="unique findme content", ttl_days=7)
+        expire_memory("searchable")
+
+        results = storage.search("findme")
+        assert len(results) == 0
+
+    def test_expired_excluded_from_list(self, storage, expire_memory):
+        """Expired memory should not appear in list_memories."""
+        storage.store(key="live", value="visible")
+        storage.store(key="dead", value="hidden", ttl_days=7)
+        expire_memory("dead")
+
+        memories = storage.list_memories()
+        keys = {m.key for m in memories}
+        assert "live" in keys
+        assert "dead" not in keys
+
+    def test_expired_excluded_from_query(self, storage, expire_memory):
+        """Expired memory should not appear in query results."""
+        storage.store(key="q-live", value="visible", namespace="test")
+        storage.store(key="q-dead", value="hidden", namespace="test", ttl_days=7)
+        expire_memory("q-dead")
+
+        results = storage.query(QueryFilters(namespace="test"))
+        keys = {m.key for m in results}
+        assert "q-live" in keys
+        assert "q-dead" not in keys
+
+    def test_expired_excluded_from_explore(self, storage, expire_memory):
+        """Expired memories should not be counted in explore() statistics."""
+        storage.store(key="e1", value="one")
+        storage.store(key="e2", value="two")
+        storage.store(key="e3", value="three", ttl_days=7)
+        expire_memory("e3")
+
+        stats = storage.explore()
+        assert stats.total_count == 2
+
+    def test_expired_excluded_from_aggregate(self, storage, expire_memory):
+        """Expired memories should not appear in aggregate results."""
+        storage.store(key="a1", value="one", namespace="ns")
+        storage.store(key="a2", value="two", namespace="ns", ttl_days=7)
+        expire_memory("a2")
+
+        result = storage.aggregate(group_by="namespace")
+        assert result["total"] == 1
+        assert result["groups"]["ns"] == 1
+
+    def test_non_expired_memory_still_returned(self, storage):
+        """Memory with TTL that hasn't expired should still be visible."""
+        memory = storage.store(key="fresh", value="still alive", ttl_days=30)
+        assert memory.expires_at is not None
+
+        recalled = storage.recall_by_key("fresh")
+        assert recalled is not None
+        assert recalled.key == "fresh"
+
+        results = storage.search("alive")
+        assert len(results) == 1
+
+        memories = storage.list_memories()
+        assert len(memories) == 1
+
+    def test_no_ttl_memory_unaffected(self, storage):
+        """Memory without TTL should always be returned."""
+        storage.store(key="permanent", value="forever")
+        recalled = storage.recall_by_key("permanent")
+        assert recalled is not None
+        assert recalled.expires_at is None
+
+    def test_expired_memory_not_access_counted(self, storage, expire_memory, temp_db):
+        """Recalling an expired memory should not increment access_count."""
+        storage.store(key="tracked", value="data", ttl_days=7)
+        expire_memory("tracked")
+
+        # Attempt recall — should return None
+        assert storage.recall_by_key("tracked") is None
+
+        # Verify access_count was NOT incremented
+        with sqlite3.connect(temp_db) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT access_count FROM memories WHERE key = ?", ("tracked",)
+            ).fetchone()
+            assert row["access_count"] == 0
+
+    def test_lazy_cleanup_on_store(self, storage, expire_memory, temp_db):
+        """Storing a new memory should delete expired rows from the database."""
+        storage.store(key="old", value="expired data", ttl_days=7)
+        expire_memory("old")
+
+        # Storing a new memory triggers cleanup
+        storage.store(key="new", value="fresh data")
+
+        # Verify the expired row was physically deleted
+        with sqlite3.connect(temp_db) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM memories WHERE key = ?", ("old",)
+            ).fetchone()
+            assert row[0] == 0
+
+    def test_re_stored_memory_becomes_visible(self, storage, expire_memory):
+        """Re-storing an expired memory with new TTL should make it visible again."""
+        storage.store(key="revived", value="v1", ttl_days=7)
+        expire_memory("revived")
+
+        assert storage.recall_by_key("revived") is None
+
+        # Re-store with new TTL
+        storage.store(key="revived", value="v2", ttl_days=30)
+        recalled = storage.recall_by_key("revived")
+        assert recalled is not None
+        assert recalled.value == "v2"
